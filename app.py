@@ -109,7 +109,7 @@ usuario_autenticado = st.session_state["usuario"]
 
 # --- APÓS LOGIN, CARREGAR DADOS DA MARCA SELECIONADA ---
 
-st.title("📊 Análi das Marcas")
+st.title("📊 Análise das Marcas")
 
 st.sidebar.header("Selecione a Marca")
 marca_selecionada = st.sidebar.selectbox("Marca", abas, index=0)
