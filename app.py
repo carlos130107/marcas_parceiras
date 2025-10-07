@@ -5,13 +5,12 @@ import altair as alt
 # CONFIGURAÇÕES DA PÁGINA
 st.set_page_config(
     page_title="Análise das Marcas",
-    page_icon= "📊",
+    page_icon="📊",
     layout="wide")
 
 # CSS PARA DARK MODE COMPLETO
 st.markdown("""
     <style>
-        /* Seu CSS aqui (mantido igual) */
         .stApp {
             background-color: #0e1117 !important;
             color: white !important;
@@ -56,14 +55,17 @@ if "autenticado" not in st.session_state:
     st.session_state["usuario"] = ""
 
 # --- CARREGAR DADOS PARA GERAR USUÁRIOS E SENHAS ---
-
 arquivo = "dados.xlsx"
-abas = pd.ExcelFile(arquivo).sheet_names
+try:
+    abas = pd.ExcelFile(arquivo).sheet_names
+except FileNotFoundError:
+    st.error("Arquivo 'dados.xlsx' não encontrado. Verifique o caminho do arquivo.")
+    st.stop()
 
 # Carregar a primeira aba para extrair nomes dos gerentes
 df_usuarios = pd.read_excel(arquivo, sheet_name=abas[0])
 
-# Renomear colunas para garantir que "Nome Gerente" exista
+# Renomear colunas para garantir que "Nome Gerente" exista (assumindo estrutura fixa; fragil se Excel mudar)
 df_usuarios.rename(columns={
     df_usuarios.columns[0]: "Gerente",
     df_usuarios.columns[1]: "Nome Gerente",
@@ -108,15 +110,12 @@ if not st.session_state["autenticado"]:
 usuario_autenticado = st.session_state["usuario"]
 
 # --- APÓS LOGIN, CARREGAR DADOS DA MARCA SELECIONADA ---
-
-st.title("📊 Análise das Marcas")
-
 st.sidebar.header("Selecione a Marca")
 marca_selecionada = st.sidebar.selectbox("Marca", abas, index=0)
 
 df = pd.read_excel(arquivo, sheet_name=marca_selecionada)
 
-# Renomear colunas com atenção à posição correta da coluna "Positivações"
+# Renomear colunas (assumindo estrutura fixa; fragil se Excel mudar)
 df.rename(columns={
     df.columns[0]: "Gerente",
     df.columns[1]: "Nome Gerente",
@@ -153,10 +152,15 @@ df["Periodo"] = pd.to_datetime(df["Periodo"], errors="coerce")
 df["MesAnoOrd"] = df["Periodo"].dt.to_period("M").dt.to_timestamp()
 df["MesAno"] = df["Periodo"].dt.strftime("%b/%Y")
 
+# **TÍTULO DINÂMICO: Inclui o nome da marca selecionada**
+st.title(f"📊 Análise {marca_selecionada}")
+
 # SIDEBAR DE FILTROS
 st.sidebar.header("Filtros")
 
 def filtro_selectbox(coluna, df_input):
+    if coluna not in df_input.columns or df_input[coluna].isnull().all():
+        return df_input  # Se coluna não existe ou está vazia, ignora filtro
     opcoes = ["Todos"] + sorted(df_input[coluna].dropna().unique().tolist())
     selecao = st.sidebar.selectbox(coluna, opcoes)
     if selecao == "Todos":
@@ -168,12 +172,10 @@ def filtro_selectbox(coluna, df_input):
 df_filtrado = df.copy()
 
 # Filtro Supervisor
-if "Supervisor" in df_filtrado.columns and not df_filtrado["Supervisor"].isnull().all():
-    df_filtrado = filtro_selectbox("Supervisor", df_filtrado)
+df_filtrado = filtro_selectbox("Supervisor", df_filtrado)
 
 # Filtro Representante
-if "Representante" in df_filtrado.columns and not df_filtrado["Representante"].isnull().all():
-    df_filtrado = filtro_selectbox("Representante", df_filtrado)
+df_filtrado = filtro_selectbox("Representante", df_filtrado)
 
 # Verificar se após filtros há dados
 if df_filtrado.empty:
@@ -187,7 +189,11 @@ df_grouped = df_filtrado.groupby(["MesAnoOrd", "MesAno"], as_index=False).agg({
     "Positivações": "sum"
 }).sort_values("MesAnoOrd")
 
-# Funções para gráficos e visualização (mantidas iguais)
+if df_grouped.empty:
+    st.warning("Nenhum dado agrupado disponível.")
+    st.stop()
+
+# Funções para gráficos e visualização
 def configure_black_background(chart):
     return chart.configure_axis(
                 labelColor='white',
@@ -225,82 +231,70 @@ def calcular_dominio_y(serie):
 
 # Gráfico Peso
 st.subheader("⚖️ Evolução do Peso")
-if not df_grouped.empty:
-    dominio_peso = calcular_dominio_y(df_grouped["Peso"])
-    base_peso = alt.Chart(df_grouped).encode(
-        x=alt.X(
-            "MesAnoOrd:T",
-            title="Mês/Ano",
-            axis=alt.Axis(format="%b/%Y", labelAngle=0, labelColor="white", titleColor="white", tickCount="month")
-        ),
-        y=alt.Y(
-            "Peso:Q",
-            scale=alt.Scale(domain=dominio_peso),
-            axis=alt.Axis(labelColor="white", titleColor="white")
-        ),
-        tooltip=["MesAno", "Peso"]
-    )
-    linha_peso = base_peso.mark_line(point=True, color='cyan', interpolate='monotone').properties(height=500)
-    rotulos_peso = adicionar_rotulos(base_peso, "Peso", formato=",.0f")
-    st.altair_chart(configure_black_background(linha_peso + rotulos_peso), use_container_width=True)
-else:
-    st.warning("Nenhum dado disponível para o período selecionado.")
+dominio_peso = calcular_dominio_y(df_grouped["Peso"])
+base_peso = alt.Chart(df_grouped).encode(
+    x=alt.X(
+        "MesAnoOrd:T",
+        title="Mês/Ano",
+        axis=alt.Axis(format="%b/%Y", labelAngle=0, labelColor="white", titleColor="white", tickCount="month")
+    ),
+    y=alt.Y(
+        "Peso:Q",
+        scale=alt.Scale(domain=dominio_peso),
+        axis=alt.Axis(labelColor="white", titleColor="white")
+    ),
+    tooltip=["MesAno", "Peso"]
+)
+linha_peso = base_peso.mark_line(point=True, color='cyan', interpolate='monotone').properties(height=500, width=800)
+rotulos_peso = adicionar_rotulos(base_peso, "Peso", formato=",.0f")
+st.altair_chart(configure_black_background(linha_peso + rotulos_peso), use_container_width=True)
 
 # Gráfico Faturamento
 st.subheader("💵 Evolução do Faturamento")
-if not df_grouped.empty:
-    dominio_fat = calcular_dominio_y(df_grouped["Faturamento"])
-    base_fat = alt.Chart(df_grouped).encode(
-        x=alt.X(
-            "MesAnoOrd:T",
-            title="Mês/Ano",
-            axis=alt.Axis(format="%b/%Y", labelAngle=0, labelColor="white", titleColor="white", tickCount="month")
-        ),
-        y=alt.Y(
-            "Faturamento:Q",
-            scale=alt.Scale(domain=dominio_fat),
-            axis=alt.Axis(labelColor="white", titleColor="white")
-        ),
-        tooltip=["MesAno", "Faturamento"]
-    )
-    linha_fat = base_fat.mark_line(point=True, color='lime', interpolate='monotone').properties(height=500)
-    rotulos_fat = adicionar_rotulos(base_fat, "Faturamento", formato="$,.0f", cor="white")
-    st.altair_chart(configure_black_background(linha_fat + rotulos_fat), use_container_width=True)
-else:
-    st.warning("Nenhum dado disponível para o período selecionado.")
+dominio_fat = calcular_dominio_y(df_grouped["Faturamento"])
+base_fat = alt.Chart(df_grouped).encode(
+    x=alt.X(
+        "MesAnoOrd:T",
+        title="Mês/Ano",
+        axis=alt.Axis(format="%b/%Y", labelAngle=0, labelColor="white", titleColor="white", tickCount="month")
+    ),
+    y=alt.Y(
+        "Faturamento:Q",
+        scale=alt.Scale(domain=dominio_fat),
+        axis=alt.Axis(labelColor="white", titleColor="white")
+    ),
+    tooltip=["MesAno", "Faturamento"]
+)
+linha_fat = base_fat.mark_line(point=True, color='lime', interpolate='monotone').properties(height=500, width=800)
+rotulos_fat = adicionar_rotulos(base_fat, "Faturamento", formato="$,.0f", cor="white")
+st.altair_chart(configure_black_background(linha_fat + rotulos_fat), use_container_width=True)
 
 # Gráfico Positivações
 st.subheader("🛒 Evolução das Positivações")
-if not df_grouped.empty:
-    dominio_pos = calcular_dominio_y(df_grouped["Positivações"])
-    base_pos = alt.Chart(df_grouped).encode(
-        x=alt.X(
-            "MesAnoOrd:T",
-            title="Mês/Ano",
-            axis=alt.Axis(format="%b/%Y", labelAngle=0, labelColor="white", titleColor="white", tickCount="month")
-        ),
-        y=alt.Y(
-            "Positivações:Q",
-            scale=alt.Scale(domain=dominio_pos),
-            axis=alt.Axis(labelColor="white", titleColor="white")
-        ),
-        tooltip=["MesAno", "Positivações"]
-    )
-    linha_pos = base_pos.mark_line(point=True, color='orange', interpolate='monotone').properties(height=500)
-    rotulos_pos = adicionar_rotulos(base_pos, "Positivações", formato=",.0f", cor="white")
-    st.altair_chart(configure_black_background(linha_pos + rotulos_pos), use_container_width=True)
-else:
-    st.warning("Nenhum dado disponível para o período selecionado.")
+dominio_pos = calcular_dominio_y(df_grouped["Positivações"])
+base_pos = alt.Chart(df_grouped).encode(
+    x=alt.X(
+        "MesAnoOrd:T",
+        title="Mês/Ano",
+        axis=alt.Axis(format="%b/%Y", labelAngle=0, labelColor="white", titleColor="white", tickCount="month")
+    ),
+    y=alt.Y(
+        "Positivações:Q",
+        scale=alt.Scale(domain=dominio_pos),
+        axis=alt.Axis(labelColor="white", titleColor="white")
+    ),
+    tooltip=["MesAno", "Positivações"]
+)
+linha_pos = base_pos.mark_line(point=True, color='orange', interpolate='monotone').properties(height=500, width=800)
+rotulos_pos = adicionar_rotulos(base_pos, "Positivações", formato=",.0f", cor="white")
+st.altair_chart(configure_black_background(linha_pos + rotulos_pos), use_container_width=True)
 
 # Tabela resumo
 st.subheader("📋 Resumo dos Dados")
-if not df_grouped.empty:
-    df_display = df_grouped.copy()
-    df_display["Peso"] = df_display["Peso"].map(lambda x: f"{x:,.0f} kg")
-    df_display["Faturamento"] = df_display["Faturamento"].map(lambda x: f"R$ {x:,.0f}")
-    df_display["Positivações"] = df_display["Positivações"].map(lambda x: f"{x:,.0f}")
-    df_display = df_display[["MesAno", "Peso", "Faturamento", "Positivações"]]
-    df_display.columns = ["Mês/Ano", "Peso Total", "Faturamento Total", "Positivações Totais"]
-    st.dataframe(df_display, use_container_width=True)
-else:
-    st.warning("Nenhum dado para exibir na tabela.")
+df_display = df_grouped.copy()
+df_display["Peso"] = df_display["Peso"].map(lambda x: f"{x:,.0f} kg")
+df_display["Faturamento"] = df_display["Faturamento"].map(lambda x: f"R$ {x:,.0f}")
+df_display["Positivações"] = df_display["Positivações"].map(lambda x: f"{x:,.0f}")
+df_display = df_display[["MesAno", "Peso", "Faturamento", "Positivações"]]
+df_display.columns = ["Mês/Ano", "Peso Total", "Faturamento Total", "Positivações Totais"]
+st.dataframe(df_display, use_container_width=True, hide_index=True)
