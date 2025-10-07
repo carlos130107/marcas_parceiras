@@ -62,8 +62,12 @@ except FileNotFoundError:
     st.error("Arquivo 'dados.xlsx' não encontrado. Verifique o caminho do arquivo.")
     st.stop()
 
-# Carregar a primeira aba para extrair nomes dos gerentes
-df_usuarios = pd.read_excel(arquivo, sheet_name=abas[0])
+# Filtrar abas para ocultar "Supervisores" (não aparece no selectbox de marcas)
+abas_filtradas = [aba for aba in abas if aba != "Supervisores"]
+
+# Carregar a primeira aba válida (não "Supervisores") para extrair nomes dos gerentes
+primeira_aba_valida = next((aba for aba in abas if aba != "Supervisores"), abas[0])
+df_usuarios = pd.read_excel(arquivo, sheet_name=primeira_aba_valida)
 
 # Renomear colunas para garantir que "Nome Gerente" exista (assumindo estrutura fixa; fragil se Excel mudar)
 df_usuarios.rename(columns={
@@ -111,7 +115,8 @@ usuario_autenticado = st.session_state["usuario"]
 
 # --- APÓS LOGIN, CARREGAR DADOS DA MARCA SELECIONADA ---
 st.sidebar.header("Selecione a Marca")
-marca_selecionada = st.sidebar.selectbox("Marca", abas, index=0)
+# Usar abas_filtradas para ocultar "Supervisores" no dropdown
+marca_selecionada = st.sidebar.selectbox("Marca", abas_filtradas, index=0)
 
 df = pd.read_excel(arquivo, sheet_name=marca_selecionada)
 
